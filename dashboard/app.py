@@ -78,6 +78,7 @@ import queue
 import sys
 import threading
 import time
+import uuid
 from datetime import datetime, timezone
 # queue is still imported for log_queue used inside AlertLogger
 from typing import Optional
@@ -185,6 +186,7 @@ _preproc_lock = threading.Lock()
 
 # Pipeline control.
 _stop_event:        threading.Event           = threading.Event()
+_log_stop_event:    threading.Event           = threading.Event()
 _capture_thread:    Optional[threading.Thread] = None
 _process_thread:    Optional[threading.Thread] = None
 _log_worker_thread: Optional[threading.Thread] = None
@@ -196,6 +198,8 @@ _crowd_frames_lock = threading.Lock()
 _crowd_alert_lock = threading.Lock()
 _crowd_last_alert = 0.0
 _crowd_camera_status: dict[str, str] = {"entry": "offline", "exit": "offline"}
+_crowd_people_counts: dict[str, int] = {"entry": 0, "exit": 0}
+_crowd_source_type = "camera"
 _crowd_directions = {"entry": "left_to_right", "exit": "left_to_right"}
 _cleanup_timer:     Optional[threading.Timer]  = None   # Enhancement 2
 
@@ -772,7 +776,7 @@ def _process_thread_fn(stop_event: threading.Event, alert_logger: AlertLogger) -
                         alert_logger.submit(
                             track_id=track.track_id,
                             violation=violation,
-                            timestamp=timestamp,
+                            timestamp=time.time(),
                             raw_frame=frame,          # raw un-annotated frame
                             all_tracks=tracks,
                             session_start=session_start,
@@ -805,7 +809,7 @@ def _process_thread_fn(stop_event: threading.Event, alert_logger: AlertLogger) -
                         alert_logger.submit(
                             track_id=-1,
                             violation=f"Weapon Detected: {wd.label}",
-                            timestamp=object_timestamp,
+                            timestamp=time.time(),
                             raw_frame=object_frame,
                             all_tracks=tracks,
                             session_start=session_start,
@@ -839,7 +843,7 @@ def _process_thread_fn(stop_event: threading.Event, alert_logger: AlertLogger) -
                         alert_logger.submit(
                             track_id=tid,
                             violation="Possible Theft",
-                            timestamp=object_timestamp,
+                            timestamp=time.time(),
                             raw_frame=object_frame,
                             all_tracks=tracks,
                             session_start=session_start,
@@ -862,7 +866,7 @@ def _process_thread_fn(stop_event: threading.Event, alert_logger: AlertLogger) -
                     alert_logger.submit(
                         track_id=abandoned.bag_id,
                         violation="Abandoned Bag",
-                        timestamp=object_timestamp,
+                        timestamp=time.time(),
                         raw_frame=object_frame,
                         all_tracks=tracks,
                         session_start=session_start,
@@ -1037,13 +1041,25 @@ def _publish_crowd_frames() -> None:
         entry_copy = entry_frame.copy() if entry_frame is not None else None
         exit_copy = exit_frame.copy() if exit_frame is not None else None
 
+    with _status_lock:
+        people_counts = dict(_crowd_people_counts)
+        feeds_ready = all(
+            _crowd_camera_status[role] == "online"
+            for role in ("entry", "exit")
+        )
+
     panel_height = 480
     panels = []
-    for role, frame in (("ENTRY CAMERA", entry_copy), ("EXIT CAMERA", exit_copy)):
+    labels = {
+        "entry": ("ENTRY VIDEO" if _crowd_source_type == "videos" else "ENTRY CAMERA"),
+        "exit": ("EXIT VIDEO" if _crowd_source_type == "videos" else "EXIT CAMERA"),
+    }
+    for role, frame in (("entry", entry_copy), ("exit", exit_copy)):
+        label = labels[role]
         if frame is None:
             panel = np.zeros((panel_height, 640, 3), dtype=np.uint8)
             cv2.putText(
-                panel, f"{role} OFFLINE", (24, panel_height // 2),
+                panel, f"{label} OFFLINE", (24, panel_height // 2),
                 cv2.FONT_HERSHEY_SIMPLEX, 0.8, (90, 130, 160), 2, cv2.LINE_AA,
             )
         else:
@@ -1055,26 +1071,39 @@ def _publish_crowd_frames() -> None:
             )
             cv2.rectangle(panel, (0, 0), (panel.shape[1], 38), (12, 24, 40), cv2.FILLED)
             cv2.putText(
-                panel, role, (14, 26), cv2.FONT_HERSHEY_SIMPLEX,
+                panel, f"{label}  PEOPLE {people_counts[role]}", (14, 26), cv2.FONT_HERSHEY_SIMPLEX,
                 0.65, (0, 220, 255), 2, cv2.LINE_AA,
             )
         panels.append(panel)
 
     combined = np.concatenate(panels, axis=1)
+    count_difference = people_counts["entry"] - people_counts["exit"]
+    count_alert = feeds_ready and abs(count_difference) >= (
+        _crowd_monitor.alert_threshold if _crowd_monitor is not None else 1
+    )
     if _crowd_monitor is not None:
         state = _crowd_monitor.snapshot()
+        flow_alert = state["alert_active"]
         alert_text = (
+            f"CROWD COUNT MISMATCH  ENTRY {people_counts['entry']}  "
+            f"EXIT {people_counts['exit']}  DIFF {count_difference:+d}"
+            if count_alert else
+            "WAITING FOR BOTH FEEDS"
+            if not feeds_ready else
             f"FLOW IMBALANCE  IN {state['entry_count']}  OUT {state['exit_count']}  "
             f"DIFF {state['difference']:+d}"
-            if state["alert_active"] else
+            if flow_alert else
             f"FLOW BALANCED  IN {state['entry_count']}  OUT {state['exit_count']}"
         )
-        color = (0, 0, 255) if state["alert_active"] else (0, 190, 0)
+        alert_active = count_alert or (feeds_ready and flow_alert)
+        color = (0, 0, 255) if alert_active else (0, 190, 0)
         cv2.rectangle(combined, (0, panel_height - 42), (combined.shape[1], panel_height), (12, 24, 40), cv2.FILLED)
         cv2.putText(
             combined, alert_text, (14, panel_height - 14),
             cv2.FONT_HERSHEY_SIMPLEX, 0.65, color, 2, cv2.LINE_AA,
         )
+
+
     with frame_lock:
         global latest_frame
         latest_frame = combined
@@ -1082,26 +1111,32 @@ def _publish_crowd_frames() -> None:
 
 def _crowd_camera_worker(
     role: str,
-    camera_index: int,
+    source: int | str,
     direction: str,
     stop_event: threading.Event,
     alert_logger: AlertLogger,
 ) -> None:
-    """Capture, track, and count crossings for one doorway camera."""
+    """Read one camera/video, count people and crossings, and capture alerts."""
     global _crowd_last_alert
-    cap = cv2.VideoCapture(camera_index)
-    cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+    source_label = (
+        f"{role} video '{os.path.basename(source)}'"
+        if isinstance(source, str)
+        else f"{role} camera index {source}"
+    )
+    cap = cv2.VideoCapture(source)
+    if not isinstance(source, str):
+        cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
     if not cap.isOpened():
-        message = f"Cannot open {role} camera index {camera_index}"
-        logger.error("[Crowd] %s", message)
+        logger.error("[Crowd] Cannot open %s.", source_label)
         with _status_lock:
             _crowd_camera_status[role] = "error"
         stop_event.set()
         return
 
-    with _status_lock:
-        _crowd_camera_status[role] = "online"
-    tracker = None
+    source_fps = cap.get(cv2.CAP_PROP_FPS) if isinstance(source, str) else 0.0
+    if source_fps <= 0 or source_fps > 120:
+        source_fps = 25.0
+    frame_interval = 1.0 / source_fps
     try:
         tracker = PersonTracker(
             model_path=config.YOLO_MODEL_PATH,
@@ -1110,21 +1145,26 @@ def _crowd_camera_worker(
             tracker_type=config.TRACKER_TYPE,
         )
         logger.info(
-            "[Crowd] %s camera=%d device=%s direction=%s",
-            role, camera_index, tracker.device, direction,
+            "[Crowd] %s device=%s direction=%s",
+            source_label, tracker.device, direction,
         )
         last_tracks = []
         frame_number = 0
-        previous_ids: set[int] = set()
         fps_started = time.perf_counter()
         fps_count = 0
         camera_started = time.monotonic()
         while not stop_event.is_set():
+            loop_started = time.perf_counter()
             ok, frame = cap.read()
             if not ok:
-                logger.error("[Crowd] Lost %s camera %d feed.", role, camera_index)
-                with _status_lock:
-                    _crowd_camera_status[role] = "error"
+                if isinstance(source, str):
+                    logger.info("[Crowd] Reached end of %s.", source_label)
+                    with _status_lock:
+                        _crowd_camera_status[role] = "ended"
+                else:
+                    logger.error("[Crowd] Lost feed from %s.", source_label)
+                    with _status_lock:
+                        _crowd_camera_status[role] = "error"
                 stop_event.set()
                 break
 
@@ -1135,10 +1175,11 @@ def _crowd_camera_worker(
                 _crowd_monitor.update_tracks(
                     role, last_tracks, frame.shape[1], direction, timestamp=now
                 )
-                current_ids = {track.track_id for track in last_tracks}
-                previous_ids = current_ids
-            else:
-                current_ids = previous_ids
+                with _status_lock:
+                    _crowd_camera_status[role] = "online"
+            current_count = len(last_tracks)
+            with _status_lock:
+                _crowd_people_counts[role] = current_count
 
             fps_count += 1
             elapsed = time.perf_counter() - fps_started
@@ -1152,7 +1193,7 @@ def _crowd_camera_worker(
                 tracks=last_tracks,
                 activities={},
                 fps=fps,
-                person_count=len(current_ids),
+                person_count=current_count,
                 weapon_detects=[],
                 abandoned_bags=[],
                 theft_track_ids=set(),
@@ -1164,41 +1205,58 @@ def _crowd_camera_worker(
             _publish_crowd_frames()
 
             state = _crowd_monitor.snapshot(timestamp=now)
-            if state["alert_active"]:
+            with _status_lock:
+                people_counts = dict(_crowd_people_counts)
+                feeds_ready = all(
+                    _crowd_camera_status[camera_role] == "online"
+                    for camera_role in ("entry", "exit")
+                )
+            count_difference = people_counts["entry"] - people_counts["exit"]
+            count_alert = (
+                feeds_ready
+                and abs(count_difference) >= state["alert_threshold"]
+            )
+            if feeds_ready and (count_alert or state["alert_active"]):
                 with _crowd_alert_lock:
                     if now - _crowd_last_alert >= config.CROWD_ALERT_COOLDOWN:
                         _crowd_last_alert = now
                         with frame_lock:
-                            evidence = (
-                                latest_frame.copy()
-                                if latest_frame is not None else annotated.copy()
+                            evidence = latest_frame.copy() if latest_frame is not None else annotated.copy()
+                        if count_alert:
+                            violation = (
+                                "Crowd Count Mismatch "
+                                f"(entry={people_counts['entry']}, exit={people_counts['exit']}, "
+                                f"difference={count_difference:+d})"
                             )
-                        alert_logger.submit(
-                            track_id=-1,
-                            violation=(
+                        else:
+                            violation = (
                                 "Crowd Flow Imbalance "
                                 f"(in={state['entry_count']}, out={state['exit_count']}, "
                                 f"difference={state['difference']:+d})"
-                            ),
+                            )
+                        alert_logger.submit(
+                            track_id=-1,
+                            violation=violation,
                             timestamp=time.time(),
                             raw_frame=evidence,
                             all_tracks=[],
                             session_start=_stats.get("session_start"),
                         )
-                        logger.critical(
-                            "[Crowd] Flow mismatch: entry=%d exit=%d window=%ds",
-                            state["entry_count"], state["exit_count"],
-                            state["window_seconds"],
-                        )
+                        logger.critical("[Crowd] %s", violation)
+
+            if isinstance(source, str):
+                sleep_time = frame_interval - (time.perf_counter() - loop_started)
+                if sleep_time > 0:
+                    time.sleep(sleep_time)
     except Exception:
-        logger.exception("[Crowd] %s camera worker failed.", role)
+        logger.exception("[Crowd] %s worker failed.", source_label)
         with _status_lock:
             _crowd_camera_status[role] = "error"
         stop_event.set()
     finally:
         cap.release()
         with _status_lock:
-            if _crowd_camera_status[role] != "error":
+            if _crowd_camera_status[role] == "online":
                 _crowd_camera_status[role] = "offline"
 
 
@@ -1207,21 +1265,26 @@ def _crowd_camera_worker(
 # ===========================================================================
 
 def _launch_crowd_pipeline(
-    entry_index: int,
-    exit_index: int,
+    entry_source: int | str,
+    exit_source: int | str,
+    source_type: str,
     window_seconds: int,
     alert_threshold: int,
     entry_direction: str,
     exit_direction: str,
 ) -> None:
     """Start independent entry/exit camera workers and shared alert logging."""
-    global _alert_logger, _stop_event, _log_worker_thread
+    global _alert_logger, _stop_event, _log_stop_event, _log_worker_thread
     global _crowd_threads, _crowd_monitor
     global _crowd_mode, _crowd_frames, _crowd_last_alert, _crowd_directions
+    global _crowd_source_type, _preproc_alert_logger
     global latest_frame
 
     _crowd_mode = True
     _stop_event = threading.Event()
+    _log_stop_event = threading.Event()
+    _preproc_alert_logger = None
+    _crowd_source_type = source_type
     _crowd_monitor = CrowdFlowMonitor(
         window_seconds=window_seconds,
         alert_threshold=alert_threshold,
@@ -1234,12 +1297,14 @@ def _launch_crowd_pipeline(
         latest_frame = None
     with _status_lock:
         _crowd_camera_status.update({"entry": "starting", "exit": "starting"})
+        _crowd_people_counts.update({"entry": 0, "exit": 0})
         _status.update({
             "pipeline_running": True,
-            "source": f"crowd cameras {entry_index} (entry), {exit_index} (exit)",
+            "source": f"crowd {source_type}: entry, exit",
             "fps": 0.0,
             "active_tracks": 0,
             "mode": "crowd",
+            "crowd_source_type": source_type,
         })
     with _stats_lock:
         _stats["session_start"] = time.time()
@@ -1257,7 +1322,7 @@ def _launch_crowd_pipeline(
     )
     _log_worker_thread = threading.Thread(
         target=_alert_logger.run_worker,
-        args=(_stop_event,),
+        args=(_log_stop_event,),
         name="CrowdLogWorker",
         daemon=True,
     )
@@ -1265,14 +1330,14 @@ def _launch_crowd_pipeline(
     _crowd_threads = [
         threading.Thread(
             target=_crowd_camera_worker,
-            args=("entry", entry_index, entry_direction, _stop_event, _alert_logger),
-            name="CrowdEntryCamera",
+            args=("entry", entry_source, entry_direction, _stop_event, _alert_logger),
+            name="CrowdEntrySource",
             daemon=True,
         ),
         threading.Thread(
             target=_crowd_camera_worker,
-            args=("exit", exit_index, exit_direction, _stop_event, _alert_logger),
-            name="CrowdExitCamera",
+            args=("exit", exit_source, exit_direction, _stop_event, _alert_logger),
+            name="CrowdExitSource",
             daemon=True,
         ),
     ]
@@ -1283,15 +1348,18 @@ def _launch_crowd_pipeline(
 def _launch_pipeline(source) -> None:
     """Start all three background threads for a new pipeline session."""
     global _capture_thread, _process_thread, _log_worker_thread
-    global _stop_event, _alert_logger, _cleanup_timer
+    global _stop_event, _log_stop_event, _alert_logger, _cleanup_timer
     global _is_recorded_video
     global _crowd_mode
+    global _preproc_alert_logger
     _crowd_mode = False
+    _preproc_alert_logger = None
 
     # Fix 5: detect whether source is a file path (recorded) or webcam index
     _is_recorded_video = isinstance(source, str) and len(source) > 0
 
     _stop_event = threading.Event()
+    _log_stop_event = threading.Event()
 
     _alert_logger = AlertLogger(
         snapshot_dir=config.SNAPSHOT_DIR,
@@ -1331,7 +1399,7 @@ def _launch_pipeline(source) -> None:
     # Thread 3 — log/snapshot worker (starts first)
     _log_worker_thread = threading.Thread(
         target=_alert_logger.run_worker,
-        args=(_stop_event,),
+        args=(_log_stop_event,),
         name="LogWorker",
         daemon=True,
     )
@@ -1362,6 +1430,7 @@ def _shutdown_pipeline() -> None:
     """Signal all threads to stop and wait briefly for clean exit."""
     global _capture_thread, _process_thread, _log_worker_thread, _cleanup_timer
     global _crowd_threads, _crowd_mode, _crowd_monitor, _crowd_frames
+    global _log_stop_event
 
     _stop_event.set()
 
@@ -1369,15 +1438,28 @@ def _shutdown_pipeline() -> None:
     if _cleanup_timer is not None and _cleanup_timer.is_alive():
         _cleanup_timer.cancel()
 
-    for thread, name in [
+    producer_threads = [
         (_capture_thread,    "Capture"),
         (_process_thread,    "Processing"),
-        (_log_worker_thread, "LogWorker"),
-    ] + [(thread, thread.name) for thread in _crowd_threads]:
+    ] + [(thread, thread.name) for thread in _crowd_threads]
+    for thread, name in producer_threads:
         if thread is not None and thread.is_alive():
             thread.join(timeout=5.0)
             if thread.is_alive():
                 logger.warning("%s thread did not stop within 5 s.", name)
+
+    if _alert_logger is not None and not any(
+        thread is not None and thread.is_alive()
+        for thread, _ in producer_threads
+    ):
+        _alert_logger.log_queue.join()
+    elif _alert_logger is not None:
+        logger.error("Evidence queue may still have pending jobs because a producer did not stop.")
+    _log_stop_event.set()
+    if _log_worker_thread is not None and _log_worker_thread.is_alive():
+        _log_worker_thread.join(timeout=5.0)
+        if _log_worker_thread.is_alive():
+            logger.warning("LogWorker thread did not stop within 5 s.")
 
     # Fix 1 & 2: clear shared frame holders on shutdown
     global latest_raw_frame, latest_frame
@@ -1399,6 +1481,7 @@ def _shutdown_pipeline() -> None:
         _status["active_tracks"]    = 0
         _status["mode"]             = "offline"
         _crowd_camera_status.update({"entry": "offline", "exit": "offline"})
+        _crowd_people_counts.update({"entry": 0, "exit": 0})
 
     with _stats_lock:
         _unique_ids.clear()
@@ -1522,9 +1605,6 @@ def process_and_save(video_path: str) -> None:
         log_queue_maxsize=config.LOG_QUEUE_MAXSIZE,
         snapshot_quality=config.SNAPSHOT_JPEG_QUALITY,
     )
-    # Fix 3 — clear stale events/snapshots from any previous session.
-    pp_alert_logger.reset()
-
     # Fix 2 — expose this instance at module level so /events and /snapshots
     # can read from it immediately once the queue has been drained.
     global _preproc_alert_logger
@@ -1798,9 +1878,8 @@ def start():
     mode = body.get("source", "camera")
 
     if mode == "crowd":
+        source_type = body.get("crowd_source_type", "cameras")
         try:
-            entry_index = int(body.get("entry_index", 0))
-            exit_index = int(body.get("exit_index", 1))
             window_seconds = int(body.get(
                 "window_seconds", config.CROWD_DEFAULT_WINDOW_SECONDS
             ))
@@ -1808,11 +1887,43 @@ def start():
                 "alert_threshold", config.CROWD_DEFAULT_MISMATCH_THRESHOLD
             ))
         except (TypeError, ValueError):
-            return jsonify({"error": "Camera IDs, window, and threshold must be integers."}), 400
+            return jsonify({"error": "The time window and mismatch threshold must be integers."}), 400
         entry_direction = body.get("entry_direction", "left_to_right")
         exit_direction = body.get("exit_direction", "left_to_right")
-        if entry_index < 0 or exit_index < 0 or entry_index == exit_index:
-            return jsonify({"error": "Choose two different, non-negative camera indexes."}), 400
+        if source_type == "cameras":
+            try:
+                entry_source = int(body.get("entry_index", 0))
+                exit_source = int(body.get("exit_index", 1))
+            except (TypeError, ValueError):
+                return jsonify({"error": "Camera indexes must be integers."}), 400
+            if entry_source < 0 or exit_source < 0 or entry_source == exit_source:
+                return jsonify({"error": "Choose two different, non-negative camera indexes."}), 400
+        elif source_type == "videos":
+            entry_source = body.get("entry_path", "")
+            exit_source = body.get("exit_path", "")
+            if not isinstance(entry_source, str) or not isinstance(exit_source, str):
+                return jsonify({"error": "Upload both entry and exit videos first."}), 400
+            entry_source = os.path.realpath(entry_source)
+            exit_source = os.path.realpath(exit_source)
+            upload_dir = os.path.realpath(os.path.join(config.BASE_DIR, "data", "input"))
+            if entry_source == exit_source:
+                return jsonify({"error": "Choose two different video files."}), 400
+            for role, video_path in (("entry", entry_source), ("exit", exit_source)):
+                try:
+                    inside_upload_dir = (
+                        os.path.commonpath((upload_dir, video_path)) == upload_dir
+                    )
+                except ValueError:
+                    inside_upload_dir = False
+                if not inside_upload_dir or not os.path.isfile(video_path):
+                    return jsonify({"error": f"Upload a valid {role} video before starting."}), 400
+                video_cap = cv2.VideoCapture(video_path)
+                opened = video_cap.isOpened()
+                video_cap.release()
+                if not opened:
+                    return jsonify({"error": f"OpenCV cannot open the {role} video."}), 400
+        else:
+            return jsonify({"error": "Crowd source must be cameras or videos."}), 400
         if not 10 <= window_seconds <= 3600:
             return jsonify({"error": "Comparison window must be between 10 and 3600 seconds."}), 400
         if not 1 <= alert_threshold <= 1000:
@@ -1824,14 +1935,13 @@ def start():
             if _status["pipeline_running"]:
                 return jsonify({"error": "Pipeline already running."}), 400
         _launch_crowd_pipeline(
-            entry_index, exit_index, window_seconds, alert_threshold,
-            entry_direction, exit_direction,
+            entry_source, exit_source, source_type, window_seconds,
+            alert_threshold, entry_direction, exit_direction,
         )
         return jsonify({
             "status": "started",
             "mode": "crowd",
-            "entry_camera": entry_index,
-            "exit_camera": exit_index,
+            "crowd_source_type": source_type,
             "window_seconds": window_seconds,
             "alert_threshold": alert_threshold,
         }), 200
@@ -2046,6 +2156,22 @@ def stats():
     )
     with _status_lock:
         snap["crowd_cameras"] = dict(_crowd_camera_status)
+        snap["crowd_people"] = dict(_crowd_people_counts)
+        snap["crowd_feeds_ready"] = all(
+            snap["crowd_cameras"][role] == "online"
+            for role in ("entry", "exit")
+        )
+    crowd_threshold = crowd_monitor.alert_threshold if crowd_monitor is not None else (
+        config.CROWD_DEFAULT_MISMATCH_THRESHOLD
+    )
+    people_difference = (
+        snap["crowd_people"]["entry"] - snap["crowd_people"]["exit"]
+    )
+    snap["crowd_people_difference"] = people_difference
+    snap["crowd_people_alert_active"] = (
+        snap["crowd_feeds_ready"]
+        and abs(people_difference) >= crowd_threshold
+    )
 
     return jsonify(snap)
 
@@ -2059,9 +2185,13 @@ def upload():
     if not f.filename:
         return jsonify({"error": "Empty filename."}), 400
     from werkzeug.utils import secure_filename
+    filename = secure_filename(f.filename)
+    extension = os.path.splitext(filename)[1].lower()
+    if not filename or extension not in {".mp4", ".avi", ".mov", ".mkv", ".webm", ".m4v"}:
+        return jsonify({"error": "Choose an MP4, AVI, MOV, MKV, WEBM, or M4V video."}), 400
     upload_dir = os.path.join(config.BASE_DIR, "data", "input")
     os.makedirs(upload_dir, exist_ok=True)
-    filename = secure_filename(f.filename)
+    filename = f"{uuid.uuid4().hex[:10]}_{filename}"
     save_path = os.path.join(upload_dir, filename)
     f.save(save_path)
     logger.info("[Upload] Saved uploaded file to: %s", save_path)

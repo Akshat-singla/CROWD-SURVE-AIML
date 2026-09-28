@@ -126,7 +126,7 @@ class AlertLogger:
             }
         """
         logger.info("Log worker thread started.")
-        while not stop_event.is_set():
+        while not stop_event.is_set() or not self.log_queue.empty():
             try:
                 job = self.log_queue.get(timeout=0.5)
             except queue.Empty:
@@ -249,7 +249,7 @@ class AlertLogger:
 
         # ── Save snapshot JPEG at quality 95 (evidence grade) ─────────
         safe_vtype  = violation.lower().replace(" ", "_").replace("/", "_")
-        snap_name   = f"snapshot_{track_id}_{safe_vtype}_{int(ts)}.jpg"
+        snap_name   = f"snapshot_{event_id}_{track_id}_{safe_vtype}_{int(ts)}.jpg"
         snap_path   = os.path.join(self.snapshot_dir, snap_name)
         snapshot_ok = False
 

@@ -33,7 +33,7 @@ A modular, production-oriented Python surveillance system that detects people in
 - **Alert event log** with activity-type filter chips, refreshed every 3 s
 - **Snapshot gallery tab** with lightbox full-size view
 - **Offline preprocessing mode** — full inference pass saved as annotated MP4, then streamed at native FPS via `/processed_feed`
-- **Two-camera crowd mode** — separate entry/exit cameras count tracked people crossing a configurable center line, compare rolling totals, and raise dashboard/evidence alerts for a configurable mismatch
+- **Two-feed stampede-control mode** — compare live entry/exit cameras or two uploaded, synchronized videos; track current people counts and center-line crossings, and raise dashboard/evidence alerts when counts differ beyond the configured threshold
 
 ### Operational & Performance
 - **GPU acceleration** — auto-selects CUDA → Apple MPS → CPU
@@ -169,19 +169,27 @@ FPS depends on input resolution, camera, GPU load, model weights, and scene dens
 
 ### Two-camera crowd-flow mode
 
-Choose **Crowd** in the dashboard, enter two different camera indexes, set the
-entry/exit crossing direction for each view, and configure the rolling time
-window and allowed count mismatch. The current default is 60 seconds and 5
-people. A crossing is counted when a tracked centroid passes the center line
-with a small hysteresis band to reduce jitter. When the absolute entry-minus-
-exit total in the window reaches the threshold, the system writes a dashboard
-event and evidence snapshot. Alerts currently stay in the dashboard and local
-event log; external dispatch to authorities is not configured.
+Choose **Crowd** in the dashboard, then select **Live cameras** or **Upload
+videos**. For cameras, enter two different camera indexes. For videos, upload
+one entry clip and one exit clip; both play at their recorded frame rate and
+comparison ends when the first clip reaches its end. Use clips of the same
+event and synchronized start time for a meaningful comparison. Set the
+entry/exit crossing direction, rolling time window, and allowed count
+mismatch. The current default is 60 seconds and 5 people.
 
-The two camera views must cover the same controlled entrance/exit boundary.
-Camera placement, occlusion, missed detections, track-ID switches, or people
-crossing in groups can affect the count. This is an operational warning aid,
-not a guaranteed crowd-safety or emergency-dispatch system.
+The dashboard compares the people currently visible in both feeds and also
+counts tracked centroid crossings of each center line (with a small
+hysteresis band to reduce jitter). It logs an evidence snapshot when either
+the visible people-count difference or the rolling entry/exit crossing-count
+difference reaches the threshold. The snapshot gallery keeps a separate JPEG
+per alert. Alerts currently stay in the dashboard and local event log;
+external dispatch to authorities is not configured.
+
+The two feeds must represent the same controlled entrance/exit boundary and,
+for uploaded videos, the same time period. Camera placement, unsynchronized
+clips, occlusion, missed detections, track-ID switches, or people crossing in
+groups can affect the count. This is an operational warning aid, not a
+guaranteed crowd-safety or emergency-dispatch system.
 
 ### 4. DeepSORT tracker (optional)
 
