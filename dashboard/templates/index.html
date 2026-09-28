@@ -1,0 +1,938 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>AI Surveillance &mdash; Behaviour Detection Dashboard</title>
+<meta name="description" content="Real-time AI surveillance dashboard."/>
+<meta http-equiv="Cache-Control" content="no-cache,no-store,must-revalidate"/>
+<meta http-equiv="Pragma" content="no-cache"/><meta http-equiv="Expires" content="0"/>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet"/>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg-primary:#0a0e1a;--bg-secondary:#111827;--bg-tertiary:#1a2236;
+  --bg-hover:#1e2d45;--border:#1e3a5f;--accent:#1d6fa4;
+  --accent-bright:#2e9fd4;--accent-glow:rgba(29,111,164,0.15);
+  --text-primary:#e8edf5;--text-secondary:#8a9bb5;--text-muted:#4a5568;
+  --success:#22c55e;--warning:#f59e0b;--danger:#ef4444;
+  --purple:#a855f7;--orange:#f97316;--magenta:#ec4899;
+}
+html,body{height:100%;overflow:hidden}
+body{font-family:'Inter','Segoe UI',system-ui,sans-serif;background:var(--bg-primary);
+  color:var(--text-primary);height:100vh;display:flex;flex-direction:column;
+  padding-top:48px;padding-bottom:60px;}
+::-webkit-scrollbar{width:4px}::-webkit-scrollbar-track{background:var(--bg-primary)}
+::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px}
+header{height:48px;background:var(--bg-secondary);border-bottom:1px solid var(--border);
+  display:flex;align-items:center;justify-content:space-between;padding:0 24px;
+  position:fixed;top:0;left:0;right:0;z-index:100;}
+.header-left{display:flex;align-items:center}
+.header-title{font-size:.85rem;font-weight:700;letter-spacing:.12em;color:var(--accent-bright)}
+.header-sub{font-size:.7rem;color:var(--text-secondary);margin-left:12px;letter-spacing:.05em}
+.header-center{display:flex;align-items:center;gap:6px;font-size:.78rem;font-weight:600;color:var(--text-secondary)}
+.header-right{font-size:.72rem;color:var(--text-muted);font-variant-numeric:tabular-nums}
+.mission-strip{height:34px;background:rgba(29,111,164,.08);border-bottom:1px solid var(--border);
+  display:flex;align-items:center;gap:8px;padding:0 24px;flex-shrink:0;overflow-x:auto}
+.mission-label{font-size:.62rem;font-weight:700;letter-spacing:.1em;color:var(--accent-bright);white-space:nowrap}
+.mission-chip{font-size:.64rem;color:var(--text-secondary);padding:3px 8px;border:1px solid var(--border);
+  border-radius:12px;white-space:nowrap;background:rgba(17,24,39,.7)}
+.mission-chip::before{content:'✓';color:var(--success);margin-right:4px}
+.mission-chip.warning{border-color:rgba(245,158,11,.5);color:var(--warning)}
+.mission-chip.warning::before{content:'!';color:var(--warning)}
+.status-dot{width:8px;height:8px;border-radius:50%;display:inline-block}
+.status-dot.idle{background:var(--text-muted)}
+.status-dot.processing{background:var(--warning);animation:pulse 1s infinite}
+.status-dot.live{background:var(--success);animation:pulse 1s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
+.main-content{flex:1;display:flex;overflow:hidden}
+.video-panel{display:flex;flex-direction:column;width:70%;height:100%;border-right:1px solid var(--border)}
+.video-wrapper{flex:1;background:#000;position:relative;overflow:hidden}
+#videoStream{width:100%;height:100%;object-fit:contain;display:block}
+.processing-overlay{display:none;position:absolute;inset:0;background:rgba(10,14,26,.92);
+  align-items:center;justify-content:center;flex-direction:column;z-index:5}
+.processing-content{text-align:center;display:flex;flex-direction:column;align-items:center;gap:12px}
+.spinner{width:48px;height:48px;border:3px solid var(--border);border-top-color:var(--accent-bright);
+  border-radius:50%;animation:spin .8s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.processing-label{font-size:.75rem;letter-spacing:.15em;color:var(--text-secondary);margin:0}
+.progress-percent{font-size:2.5rem;font-weight:700;color:var(--accent-bright);margin:0}
+.progress-track{width:280px;height:4px;background:var(--bg-tertiary);border-radius:2px;overflow:hidden}
+.progress-fill{height:100%;width:0%;background:var(--accent-bright);border-radius:2px;transition:width .4s}
+.processing-hint{font-size:.72rem;color:var(--text-muted);margin:0}
+.idle-placeholder{position:absolute;inset:0;display:flex;align-items:center;
+  justify-content:center;background:var(--bg-primary)}
+.idle-placeholder.hidden{display:none}
+.placeholder-content{text-align:center;color:var(--text-muted)}
+.placeholder-icon{font-size:3rem;margin-bottom:12px}
+.placeholder-sub{font-size:.78rem;margin-top:4px}
+.rec-badge{position:absolute;top:11px;left:11px;z-index:4;display:flex;align-items:center;
+  gap:5px;padding:3px 9px;background:rgba(10,14,26,.82);
+  border:1px solid rgba(239,68,68,.3);border-radius:20px;font-size:10px;
+  font-weight:700;letter-spacing:.08em;color:var(--danger);opacity:0;transition:opacity .2s}
+.rec-badge.on{opacity:1}
+.rec-dot{width:6px;height:6px;border-radius:50%;background:var(--danger);
+  animation:blink-rec 1.2s ease-in-out infinite}
+@keyframes blink-rec{0%,100%{opacity:1}50%{opacity:.15}}
+.controls-bar{min-height:56px;height:auto;background:var(--bg-secondary);border-top:1px solid var(--border);
+  display:flex;align-items:center;justify-content:space-between;padding:0 16px;gap:12px;flex-shrink:0}
+.control-group{display:flex;align-items:center;gap:8px}
+.file-name-display{font-size:.78rem;color:var(--text-secondary);max-width:220px;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.src-toggle{display:flex;gap:5px}
+.src-label{cursor:pointer}.src-label input{display:none}
+.src-btn{display:inline-block;padding:4px 10px;border-radius:20px;font-size:.72rem;
+  font-weight:600;border:1px solid var(--border);background:var(--bg-tertiary);
+  color:var(--text-secondary);cursor:pointer;transition:all .15s;user-select:none}
+.src-label input:checked+.src-btn{background:var(--accent-glow);border-color:var(--accent);color:var(--accent-bright)}
+.cam-row{display:flex;align-items:center;gap:6px}
+.inp-lbl{font-size:.65rem;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.07em;white-space:nowrap}
+input[type="number"].inp{width:62px;background:var(--bg-tertiary);border:1px solid var(--border);
+  border-radius:4px;color:var(--text-primary);font-size:.75rem;padding:5px 7px;outline:none}
+input[type="number"].inp:focus{border-color:var(--accent)}
+.crowd-settings{display:none;align-items:center;gap:6px;flex-wrap:wrap}
+.crowd-settings label{display:flex;align-items:center;gap:4px}
+.crowd-settings select,.crowd-settings input{max-width:82px;background:var(--bg-tertiary);
+  border:1px solid var(--border);border-radius:4px;color:var(--text-primary);font-size:.68rem;padding:5px}
+.crowd-settings select.direction{max-width:120px}
+.crowd-stats{display:none}
+.crowd-stats.active{display:flex}
+.btn{padding:7px 16px;border:1px solid var(--border);border-radius:4px;font-size:.75rem;
+  font-weight:600;letter-spacing:.05em;cursor:pointer;transition:all .15s;outline:none;
+  display:inline-flex;align-items:center;gap:5px}
+.btn-primary{background:var(--accent);border-color:var(--accent);color:#fff}
+.btn-primary:hover{background:var(--accent-bright);border-color:var(--accent-bright)}
+.btn-secondary{background:var(--bg-tertiary);color:var(--text-primary)}
+.btn-secondary:hover{background:var(--bg-hover)}
+.btn-stop-style{background:transparent;border-color:var(--danger);color:var(--danger)}
+.btn-stop-style:hover{background:rgba(239,68,68,.1)}
+.btn:disabled{opacity:.35;cursor:not-allowed}
+.right-panel{width:30%;height:100%;display:flex;flex-direction:column;background:var(--bg-secondary)}
+.tab-bar{display:flex;border-bottom:1px solid var(--border);flex-shrink:0}
+.tab{flex:1;padding:12px;background:none;border:none;border-bottom:2px solid transparent;
+  color:var(--text-secondary);font-size:.78rem;letter-spacing:.06em;cursor:pointer;transition:all .2s}
+.tab:hover{color:var(--text-primary)}
+.tab.active{color:var(--accent-bright);border-bottom-color:var(--accent-bright)}
+.tab-content{display:none;flex-direction:column;flex:1;overflow:hidden}
+.tab-content.active{display:flex}
+.log-controls{padding:10px 12px;display:flex;gap:8px;border-bottom:1px solid var(--border);flex-shrink:0}
+.log-controls input,.log-controls select{background:var(--bg-tertiary);border:1px solid var(--border);
+  color:var(--text-primary);border-radius:4px;padding:5px 7px;font-size:.73rem;outline:none}
+.log-controls input{flex:1}
+.log-controls input::placeholder{color:var(--text-muted)}
+.log-count-row{padding:5px 12px;font-size:.67rem;color:var(--text-muted);
+  border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;flex-shrink:0}
+.btn-clear-log{background:none;border:none;color:var(--text-muted);font-size:.67rem;
+  cursor:pointer;padding:2px 5px;border-radius:3px;transition:color .15s}
+.btn-clear-log:hover{color:var(--danger)}
+.log-container{flex:1;overflow-y:auto;padding:8px;display:flex;flex-direction:column;gap:6px}
+.evt{background:var(--bg-tertiary);border:1px solid var(--border);border-left:3px solid var(--accent);
+  border-radius:4px;padding:8px 10px;font-size:.74rem;transition:background .15s;
+  animation:slide-in .22s ease-out;flex-shrink:0}
+@keyframes slide-in{from{opacity:0;transform:translateX(8px)}to{opacity:1;transform:translateX(0)}}
+.evt:hover{background:var(--bg-hover)}
+.evt-running{border-left-color:var(--danger)}.evt-loitering{border-left-color:var(--warning)}
+.evt-crowd{border-left-color:var(--danger);background:rgba(239,68,68,.08)}
+.evt-lingering{border-left-color:var(--purple)}.evt-weapon{border-left-color:var(--danger)}
+.evt-bag{border-left-color:var(--orange)}.evt-theft{border-left-color:var(--magenta)}
+.evt-top{display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;gap:6px}
+.evt-type{font-size:.75rem;font-weight:600;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.evt-running .evt-type{color:var(--danger)}.evt-loitering .evt-type{color:var(--warning)}
+.evt-lingering .evt-type{color:var(--purple)}.evt-weapon .evt-type{color:var(--danger)}
+.evt-bag .evt-type{color:var(--orange)}.evt-theft .evt-type{color:var(--magenta)}
+.evt-time{font-size:.65rem;color:var(--text-muted);flex-shrink:0;font-variant-numeric:tabular-nums}
+.evt-bottom{display:flex;gap:6px}
+.evt-tag{font-size:.68rem;padding:1px 6px;border-radius:3px;background:var(--bg-secondary);
+  border:1px solid var(--border);color:var(--text-secondary)}
+.evt-tag.id-tag{color:var(--accent-bright);border-color:rgba(46,159,212,.25)}
+mark{background:rgba(245,158,11,.2);color:var(--warning);border-radius:2px;padding:0 1px}
+.empty-state{text-align:center;color:var(--text-muted);font-size:.78rem;padding:40px 20px;width:100%}
+.gf-btn{padding:4px 10px;border:1px solid var(--border);border-radius:3px;
+  background:var(--bg-tertiary);color:var(--text-secondary);font-size:.68rem;cursor:pointer;transition:all .15s}
+.gf-btn:hover,.gf-btn.active{border-color:var(--accent);color:var(--accent-bright);background:var(--accent-glow)}
+.gf-btn.active-running{border-color:var(--danger);color:var(--danger);background:rgba(239,68,68,.1)}
+.gf-btn.active-loitering{border-color:var(--warning);color:var(--warning);background:rgba(245,158,11,.1)}
+.gf-btn.active-lingering{border-color:var(--purple);color:var(--purple);background:rgba(168,85,247,.1)}
+.gf-btn.active-weapon{border-color:var(--danger);color:var(--danger);background:rgba(239,68,68,.12)}
+.gf-btn.active-bag{border-color:var(--orange);color:var(--orange);background:rgba(249,115,22,.1)}
+.gf-btn.active-theft{border-color:var(--magenta);color:var(--magenta);background:rgba(236,72,153,.1)}
+.gallery-filters{padding:10px 12px;display:flex;gap:6px;flex-wrap:wrap;
+  border-bottom:1px solid var(--border);flex-shrink:0;align-items:center}
+.gallery-info{font-size:.65rem;color:var(--text-muted);margin-left:auto}
+.gallery-grid{flex:1;overflow-y:auto;padding:10px;display:grid;
+  grid-template-columns:1fr 1fr;gap:8px;align-content:start}
+.gallery-grid::-webkit-scrollbar{width:4px}
+.gallery-grid::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px}
+.gallery-empty{grid-column:1/-1;display:flex;flex-direction:column;align-items:center;
+  justify-content:center;gap:10px;padding:40px 0;color:var(--text-muted);font-size:.78rem}
+.snap-card{background:var(--bg-tertiary);border:1px solid var(--border);border-radius:4px;
+  overflow:hidden;cursor:pointer;transition:all .15s}
+.snap-card:hover{border-color:var(--accent);transform:translateY(-1px)}
+.snap-img{width:100%;aspect-ratio:16/9;object-fit:cover;display:block;background:#000}
+.snap-meta{padding:6px 8px}
+.snap-badge{font-size:.6rem;font-weight:700;letter-spacing:.04em;text-transform:uppercase;
+  padding:2px 5px;border-radius:3px;display:inline-block}
+.badge-running{background:rgba(239,68,68,.15);color:var(--danger)}
+.badge-loitering{background:rgba(245,158,11,.15);color:var(--warning)}
+.badge-lingering{background:rgba(168,85,247,.15);color:var(--purple)}
+.badge-weapon{background:rgba(239,68,68,.2);color:var(--danger);border:1px solid rgba(239,68,68,.3)}
+.badge-bag{background:rgba(249,115,22,.15);color:var(--orange)}
+.badge-theft{background:rgba(236,72,153,.15);color:var(--magenta)}
+.snap-id{font-size:.63rem;color:var(--accent-bright);display:block;margin-top:3px}
+.snap-time{font-size:.6rem;color:var(--text-muted);display:block}
+.stats-bar{height:60px;background:var(--bg-secondary);border-top:1px solid var(--border);
+  display:flex;align-items:center;padding:0 16px;
+  position:fixed;bottom:0;left:0;right:0;z-index:100}
+.stat-item{display:flex;flex-direction:column;align-items:center;padding:0 14px;gap:2px;flex-shrink:0}
+.stat-label{font-size:.58rem;letter-spacing:.1em;color:var(--text-muted);text-transform:uppercase;white-space:nowrap}
+.stat-value{font-size:.95rem;font-weight:600;color:var(--text-primary);font-variant-numeric:tabular-nums;white-space:nowrap}
+.stat-value.safe{color:var(--success)}.stat-value.warning{color:var(--warning)}.stat-value.danger{color:var(--danger)}
+.stat-divider{width:1px;height:28px;background:var(--border);flex-shrink:0}
+.modal-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.88);
+  z-index:200;align-items:center;justify-content:center;padding:20px}
+.modal-overlay.open{display:flex}
+.modal-box{background:var(--bg-secondary);border:1px solid var(--border);border-radius:6px;
+  max-width:820px;width:100%;overflow:hidden}
+.modal-img{width:100%;max-height:60vh;object-fit:contain;display:block;background:#000}
+.modal-footer{padding:14px 18px;display:flex;align-items:center;justify-content:space-between;
+  border-top:1px solid var(--border);flex-wrap:wrap;gap:10px}
+.modal-meta{display:flex;flex-direction:column;gap:4px}
+.modal-title{font-size:.9rem;font-weight:700;color:var(--text-primary)}
+.modal-sub{font-size:.75rem;color:var(--text-secondary)}
+.modal-close{padding:6px 14px;border-radius:4px;background:var(--bg-tertiary);
+  border:1px solid var(--border);color:var(--text-secondary);font-size:.75rem;
+  font-weight:600;cursor:pointer;transition:all .15s}
+.modal-close:hover{border-color:var(--danger);color:var(--danger)}
+#toast{position:fixed;bottom:72px;left:50%;transform:translateX(-50%) translateY(60px);
+  padding:9px 18px;border-radius:4px;background:var(--bg-secondary);border:1px solid var(--border);
+  font-size:.8rem;color:var(--text-primary);box-shadow:0 8px 32px rgba(0,0,0,.5);
+  z-index:999;pointer-events:none;transition:transform .28s cubic-bezier(.4,0,.2,1);max-width:360px;text-align:center}
+#toast.show{transform:translateX(-50%) translateY(0)}
+#toast.err{border-color:rgba(239,68,68,.4);color:#ff8099}
+#toast.ok{border-color:rgba(34,197,94,.35);color:var(--success)}
+</style>
+</head>
+<body>
+<header>
+  <div class="header-left">
+    <span class="header-title">AI SURVEILLANCE SYSTEM</span>
+    <span class="header-sub">Real-Time Monitoring Platform</span>
+  </div>
+  <div class="header-center" id="status-pill">
+    <span id="statusDot" class="status-dot idle"></span>
+    <span id="status-text">OFFLINE</span>
+  </div>
+  <div class="header-right"><span id="clock">--:--:--</span></div>
+</header>
+
+<div class="mission-strip" aria-label="Project capabilities">
+  <span class="mission-label">PROJECT SCOPE</span>
+  <span class="mission-chip">Crowd counting &amp; density monitoring</span>
+  <span class="mission-chip">Behaviour over time</span>
+  <span class="mission-chip">Weapon &amp; threat detection</span>
+  <span class="mission-chip warning" id="firearm-model-status">Checking firearm model&hellip;</span>
+  <span class="mission-chip" id="inference-device-status">Checking inference device&hellip;</span>
+  <span class="mission-chip">Evidence-backed alerts</span>
+</div>
+
+<div class="main-content">
+
+  <!-- VIDEO PANEL 70% -->
+  <div class="video-panel">
+    <div class="video-wrapper">
+
+      <div id="processingOverlay" class="processing-overlay">
+        <div class="processing-content">
+          <div class="spinner"></div>
+          <p class="processing-label">PROCESSING VIDEO</p>
+          <p id="progressText" class="progress-percent">0%</p>
+          <div class="progress-track"><div id="progressBar" class="progress-fill"></div></div>
+          <p class="processing-hint">Please wait. Analysing footage&hellip;</p>
+        </div>
+      </div>
+
+      <div id="offline" class="idle-placeholder">
+        <div class="placeholder-content">
+          <div class="placeholder-icon">&#9654;</div>
+          <p>No Active Feed</p>
+          <p class="placeholder-sub">Select a source and press Start</p>
+        </div>
+      </div>
+
+      <div class="rec-badge" id="rec"><div class="rec-dot"></div>LIVE</div>
+
+      <img id="videoStream" src="" alt="Live surveillance feed"
+           style="display:none;width:100%;height:100%;object-fit:contain;"
+           onerror="if(this.src&&this.src.indexOf('/video_feed')!==-1){setTimeout(()=>{this.src='/video_feed?t='+Date.now();},500);}"/>
+    </div>
+
+    <div class="controls-bar">
+      <div class="control-group">
+        <div class="src-toggle" role="group">
+          <label class="src-label">
+            <input type="radio" name="src" value="camera" id="r-camera" checked onchange="onSrcChange()"/>
+            <span class="src-btn">&#128247; Camera</span>
+          </label>
+          <label class="src-label">
+            <input type="radio" name="src" value="video" id="r-video" onchange="onSrcChange()"/>
+            <span class="src-btn">&#127916; Video</span>
+          </label>
+          <label class="src-label">
+            <input type="radio" name="src" value="crowd" id="r-crowd" onchange="onSrcChange()"/>
+            <span class="src-btn">Crowd</span>
+          </label>
+        </div>
+        <div class="cam-row" id="cam-row">
+          <span class="inp-lbl">Cam</span>
+          <input class="inp" type="number" id="cam-idx" value="0" min="0" max="99" step="1"/>
+        </div>
+        <div id="vid-row" style="display:none;align-items:center;gap:8px;">
+          <label class="btn btn-secondary" style="cursor:pointer;">
+            &#128193; Browse
+            <input type="file" id="file-input" accept=".mp4,.avi,.mov,.mkv"
+                   style="display:none;" onchange="uploadFile(this)"/>
+          </label>
+          <span id="vid-name" class="file-name-display">No file selected</span>
+          <span id="upload-progress" style="font-size:.7rem;color:var(--accent-bright);display:none;">Uploading...</span>
+        </div>
+        <div class="crowd-settings" id="crowd-row" aria-label="Two-camera crowd-flow settings">
+          <label><span class="inp-lbl">IN Cam</span><input class="inp" type="number" id="entry-cam" value="0" min="0" max="99"/></label>
+          <label><span class="inp-lbl">IN side</span><select class="direction" id="entry-direction"><option value="left_to_right">Left → Right</option><option value="right_to_left">Right → Left</option></select></label>
+          <label><span class="inp-lbl">OUT Cam</span><input class="inp" type="number" id="exit-cam" value="1" min="0" max="99"/></label>
+          <label><span class="inp-lbl">OUT side</span><select class="direction" id="exit-direction"><option value="left_to_right">Left → Right</option><option value="right_to_left">Right → Left</option></select></label>
+          <label><span class="inp-lbl">Window s</span><input class="inp" type="number" id="crowd-window" value="60" min="10" max="3600"/></label>
+          <label><span class="inp-lbl">Alert Δ</span><input class="inp" type="number" id="crowd-threshold" value="5" min="1" max="1000"/></label>
+        </div>
+      </div>
+      <div class="control-group">
+        <button id="btn-start" class="btn btn-primary" onclick="startPipeline()">&#9654; Start</button>
+        <button id="btn-stop" class="btn btn-stop-style" onclick="stopPipeline()" disabled>&#9724; Stop</button>
+      </div>
+    </div>
+  </div><!-- /video-panel -->
+
+  <!-- RIGHT PANEL 30% -->
+  <div class="right-panel">
+    <div class="tab-bar">
+      <button class="tab active" data-tab="log" onclick="switchTab('log',this)">Event Log</button>
+      <button class="tab" data-tab="gallery" onclick="switchTab('gallery',this)">Snapshots</button>
+    </div>
+
+    <!-- Log tab -->
+    <div id="content-log" class="tab-content active">
+      <div class="log-controls">
+        <input id="search-id" type="text" placeholder="Filter by Track ID&hellip;" oninput="applyFilters()"/>
+        <select id="filter-type" onchange="applyFilters()">
+          <option value="">All Types</option>
+          <option value="running">Running</option>
+          <option value="loitering">Loitering</option>
+          <option value="lingering">Suspicious Lingering</option>
+          <option value="unsafe">Unsafe Activity</option>
+          <option value="crowd flow">Crowd Flow Imbalance</option>
+          <option value="weapon">Weapon Detected</option>
+          <option value="abandoned bag">Abandoned Bag</option>
+          <option value="theft">Possible Theft</option>
+        </select>
+        <button class="btn-clear-log" onclick="clearLog()">Clear</button>
+      </div>
+      <div class="log-count-row">
+        <span id="filter-count">Showing 0 of 0 events</span>
+        <span id="event-badge" style="font-size:.68rem;padding:2px 7px;border-radius:10px;
+          background:rgba(46,159,212,.08);border:1px solid rgba(46,159,212,.2);
+          color:var(--accent-bright);">0</span>
+      </div>
+      <div id="event-log" class="log-container" role="log" aria-live="polite">
+        <div class="empty-state" id="empty-state">No violations detected yet</div>
+      </div>
+    </div>
+
+    <!-- Gallery tab -->
+    <div id="content-gallery" class="tab-content">
+      <div class="gallery-filters">
+        <button class="gf-btn active"  id="gf-all"       onclick="setGalleryFilter('all')">All</button>
+        <button class="gf-btn"         id="gf-loitering" onclick="setGalleryFilter('loitering')">Loitering</button>
+        <button class="gf-btn"         id="gf-running"   onclick="setGalleryFilter('running')">Running</button>
+        <button class="gf-btn"         id="gf-lingering" onclick="setGalleryFilter('lingering')">Lingering</button>
+        <button class="gf-btn"         id="gf-weapon"    onclick="setGalleryFilter('weapon')">Weapon</button>
+        <button class="gf-btn"         id="gf-bag"       onclick="setGalleryFilter('bag')">Bag</button>
+        <button class="gf-btn"         id="gf-theft"     onclick="setGalleryFilter('theft')">Theft</button>
+        <span class="gallery-info" id="gallery-info">0 snapshots</span>
+      </div>
+      <div class="gallery-grid" id="gallery-grid">
+        <div class="gallery-empty" id="gallery-empty">No snapshots yet</div>
+      </div>
+    </div>
+
+  </div><!-- /right-panel -->
+</div><!-- /main-content -->
+
+<!-- Stats bar -->
+<div class="stats-bar">
+  <div class="stat-item crowd-stats" id="crowd-flow-card"><span class="stat-label">ENTRY / WINDOW</span><span class="stat-value" id="crowd-entry">0</span></div>
+  <div class="stat-divider crowd-stats" id="crowd-flow-divider1"></div>
+  <div class="stat-item crowd-stats" id="crowd-exit-card"><span class="stat-label">EXIT / WINDOW</span><span class="stat-value" id="crowd-exit">0</span></div>
+  <div class="stat-divider crowd-stats" id="crowd-flow-divider2"></div>
+  <div class="stat-item crowd-stats" id="crowd-balance-card"><span class="stat-label">FLOW BALANCE</span><span class="stat-value safe" id="crowd-balance">BALANCED</span></div>
+  <div class="stat-divider crowd-stats" id="crowd-flow-divider3"></div>
+  <div class="stat-item"><span class="stat-label">CURRENT</span><span class="stat-value" id="cnt-current">0</span></div>
+  <div class="stat-divider"></div>
+  <div class="stat-item"><span class="stat-label">CROWD STATUS</span><span class="stat-value safe" id="cnt-density">CLEAR</span></div>
+  <div class="stat-divider"></div>
+  <div class="stat-item"><span class="stat-label">PEAK</span><span class="stat-value" id="cnt-peak">0</span></div>
+  <div class="stat-divider"></div>
+  <div class="stat-item"><span class="stat-label">UNIQUE IDs</span><span class="stat-value" id="cnt-unique">0</span></div>
+  <div class="stat-divider"></div>
+  <div class="stat-item"><span class="stat-label">VIOLATIONS</span><span class="stat-value" id="event-badge-stat">0</span></div>
+  <div class="stat-divider"></div>
+  <div class="stat-item"><span class="stat-label">BAGS TRACKED</span><span class="stat-value" id="cnt-bags">0</span></div>
+  <div class="stat-divider"></div>
+  <div class="stat-item" id="speed-card" style="display:none"><span class="stat-label">PROCESSING</span><span class="stat-value" id="cnt-speed">&#8212;</span></div>
+  <div id="speed-divider" style="display:none" class="stat-divider"></div>
+  <div class="stat-item"><span class="stat-label">RAM</span><span class="stat-value" id="cnt-ram">&#8212; MB</span></div>
+  <div class="stat-divider"></div>
+  <div class="stat-item"><span class="stat-label">SESSION</span><span class="stat-value" id="cnt-dur">00:00:00</span></div>
+</div>
+
+<!-- Lightbox modal -->
+<div class="modal-overlay" id="modal" onclick="closeModal(event)">
+  <div class="modal-box" onclick="event.stopPropagation()">
+    <img class="modal-img" id="modal-img" alt="Snapshot enlarged view"/>
+    <div class="modal-footer">
+      <div class="modal-meta">
+        <div class="modal-title" id="modal-title">&#8212;</div>
+        <div class="modal-sub"   id="modal-sub">&#8212;</div>
+      </div>
+      <button class="modal-close" onclick="closeModal()">&#10005; Close</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast" role="alert" aria-live="assertive"></div>
+<script>
+'use strict';
+
+/* --- State --- */
+let running        = false;
+let allEvents      = [];
+let logCleared     = false;
+let eventCount     = 0;
+let galleryFilter  = 'all';
+let allSnapshots   = [];
+let galleryRefId   = null;
+let activeTab      = 'log';
+let selectedVideoPath = null;
+let lastCrowdError = '';
+let eventPollId   = null;
+let statusPollId  = null;
+let statsPollId   = null;
+const MAX_DOM     = 50;
+
+/* --- DOM refs --- */
+const $start     = document.getElementById('btn-start');
+const $stop      = document.getElementById('btn-stop');
+const $statusTxt = document.getElementById('status-text');
+const $clock     = document.getElementById('clock');
+const $stream    = document.getElementById('videoStream');
+const $offline   = document.getElementById('offline');
+const $rec       = document.getElementById('rec');
+const $evtLog    = document.getElementById('event-log');
+const $empty     = document.getElementById('empty-state');
+const $badge     = document.getElementById('event-badge');
+const $filterCnt = document.getElementById('filter-count');
+
+/* --- Status dot helper --- */
+function setStatus(state) {
+  const dot = document.getElementById('statusDot');
+  dot.className = 'status-dot ' + state;
+  $statusTxt.textContent = state.toUpperCase();
+}
+
+/* --- Live clock --- */
+function updateClock() {
+  const now = new Date();
+  document.getElementById('clock').textContent =
+    now.toLocaleDateString('en-GB') + '  ' + now.toLocaleTimeString('en-GB');
+}
+setInterval(updateClock, 1000);
+updateClock();
+
+/* === TAB SWITCHING === */
+function switchTab(name, btn) {
+  activeTab = name;
+  document.querySelectorAll('.tab').forEach(b => b.classList.remove('active'));
+  document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+  document.getElementById('content-' + name).classList.add('active');
+  if (btn) btn.classList.add('active');
+  if (name === 'gallery') {
+    fetchGallery();
+    galleryRefId = setInterval(fetchGallery, 5000);
+  } else {
+    clearInterval(galleryRefId);
+    galleryRefId = null;
+  }
+}
+
+/* === FILE UPLOAD === */
+async function uploadFile(input) {
+  const $name = document.getElementById('vid-name');
+  const $prog = document.getElementById('upload-progress');
+  const file  = input.files[0];
+  if (!file) return;
+  $name.textContent = file.name;
+  $prog.style.display = '';
+  $prog.textContent = 'Uploading...';
+  $start.disabled = true;
+  const formData = new FormData();
+  formData.append('file', file);
+  try {
+    const res  = await fetch('/upload', { method: 'POST', body: formData });
+    const data = await res.json();
+    if (!res.ok || data.error) {
+      toast(data.error || 'Upload failed.', 'err');
+      $prog.style.display = 'none';
+      return;
+    }
+    selectedVideoPath = data.path;
+    $prog.textContent = 'Ready';
+    setTimeout(() => { $prog.style.display = 'none'; }, 2000);
+    toast('File uploaded: ' + data.filename, 'ok');
+  } catch (e) {
+    toast('Upload error: ' + e.message, 'err');
+    $prog.style.display = 'none';
+  } finally {
+    $start.disabled = false;
+  }
+}
+
+/* === SOURCE TOGGLE === */
+function onSrcChange() {
+  const mode = document.querySelector('input[name="src"]:checked').value;
+  const cr = document.getElementById('cam-row');
+  const vr = document.getElementById('vid-row');
+  const crowd = document.getElementById('crowd-row');
+  cr.style.display = (mode === 'camera') ? 'flex' : 'none';
+  vr.style.display = (mode === 'video')  ? 'flex' : 'none';
+  crowd.style.display = mode === 'crowd' ? 'flex' : 'none';
+}
+
+/* === PIPELINE CONTROL === */
+async function startPipeline() {
+  if (running) return;
+  const mode = document.querySelector('input[name="src"]:checked').value;
+  let body;
+  if (mode === 'crowd') {
+    body = {
+      source: 'crowd',
+      entry_index: parseInt(document.getElementById('entry-cam').value, 10),
+      exit_index: parseInt(document.getElementById('exit-cam').value, 10),
+      entry_direction: document.getElementById('entry-direction').value,
+      exit_direction: document.getElementById('exit-direction').value,
+      window_seconds: parseInt(document.getElementById('crowd-window').value, 10),
+      alert_threshold: parseInt(document.getElementById('crowd-threshold').value, 10),
+    };
+  } else if (mode === 'camera') {
+    const idx = parseInt(document.getElementById('cam-idx').value, 10);
+    body = { source: 'camera', index: isNaN(idx) ? 0 : idx };
+  } else {
+    if (!selectedVideoPath) { toast('Browse and select a video file first.', 'err'); return; }
+    body = { source: 'video', path: selectedVideoPath };
+  }
+  $start.disabled = true;
+  $start.textContent = '\u25B6 Starting\u2026';
+  try {
+    const res  = await fetch('/start', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const data = await res.json();
+    if (!res.ok) { toast(data.error || 'Failed to start.', 'err'); resetStart(); return; }
+    if (data.status === 'processing') {
+      $start.textContent = '\u25B6 Processing\u2026';
+      const ov = document.getElementById('processingOverlay');
+      ov.style.display = 'flex';
+      $stream.style.display = 'none';
+      $offline.classList.add('hidden');
+      setStatus('processing');
+      toast('Pre-processing video\u2026 please wait.', 'ok');
+      pollProgress();
+    } else {
+      onLive();
+      toast('Pipeline started.', 'ok');
+    }
+  } catch (e) {
+    toast('Network error: ' + e.message, 'err');
+    resetStart();
+  }
+}
+
+function pollProgress() {
+  fetch('/progress')
+    .then(r => r.json())
+    .then(data => {
+      const pt = document.getElementById('progressText');
+      const pb = document.getElementById('progressBar');
+      if (pt) pt.textContent = data.progress + '%';
+      if (pb) pb.style.width  = data.progress + '%';
+      if (data.done) {
+        // Fix 6 — processing fully complete including all snapshots.
+        showPlayback();
+      } else {
+        setTimeout(pollProgress, 1000);
+      }
+    })
+    .catch(() => setTimeout(pollProgress, 2000));
+}
+
+/* Fix 6 — called once when /progress returns done:true.
+   Switches to the annotated video stream and loads both
+   the event log and snapshot gallery immediately. */
+function showPlayback() {
+  // Hide processing overlay, show stream.
+  document.getElementById('processingOverlay').style.display = 'none';
+  $stream.style.display = 'block';
+  $stream.src = '/processed_feed?' + Date.now();
+  $offline.classList.add('hidden');
+  $rec.classList.add('on');
+  running = true;
+  logCleared = false;
+  $stop.disabled = false;
+  $stop.textContent = '\u25A0 Stop';
+  setStatus('live');
+  document.querySelectorAll('input[name="src"]').forEach(r => r.disabled = true);
+  $start.textContent = '\u25B6 Running\u2026';
+  toast('Processing complete \u2014 streaming annotated video.', 'ok');
+
+  // Load data immediately — snapshots are guaranteed on disk by this point.
+  fetchEvents();
+  fetchGallery();
+
+  // Then refresh periodically.
+  eventPollId  = setInterval(fetchEvents,  3000);
+  statsPollId  = setInterval(fetchStats,   2000);
+  galleryRefId = setInterval(fetchGallery, 5000);
+}
+
+async function stopPipeline() {
+  if (!running) return;
+  $stop.disabled  = true;
+  $stop.textContent = '\u25A0 Stopping\u2026';
+  try { await fetch('/stop', { method: 'POST' }); } catch (_) {}
+  onOffline();
+  toast('Pipeline stopped.', 'ok');
+}
+
+function onLive() {
+  running = true; logCleared = false;
+  $start.disabled = true;
+  $start.textContent = '\u25B6 Running\u2026';
+  $stop.disabled = false;
+  $stop.textContent = '\u25A0 Stop';
+  setStatus('live');
+  $stream.style.display = 'block';
+  $stream.src = '/video_feed';
+  $offline.classList.add('hidden');
+  $rec.classList.add('on');
+  document.querySelectorAll('input[name="src"]').forEach(r => r.disabled = true);
+  startPolling();
+}
+
+function onOffline() {
+  running = false; resetStart();
+  $stop.disabled = true;
+  $stop.textContent = '\u25A0 Stop';
+  setStatus('idle');
+  $stream.style.display = 'none';
+  $stream.src = '';
+  $offline.classList.remove('hidden');
+  $rec.classList.remove('on');
+  document.querySelectorAll('input[name="src"]').forEach(r => r.disabled = false);
+  stopPolling();
+}
+
+function resetStart() {
+  $start.disabled = false;
+  $start.textContent = '\u25B6 Start';
+}
+
+/* === POLLING === */
+function startPolling() {
+  fetchEvents(); fetchStatus(); fetchStats();
+  eventPollId  = setInterval(fetchEvents,  1500);
+  statusPollId = setInterval(fetchStatus,  1000);
+  statsPollId  = setInterval(fetchStats,   1500);
+}
+function stopPolling() {
+  [eventPollId, statusPollId, statsPollId].forEach(clearInterval);
+  eventPollId = statusPollId = statsPollId = null;
+}
+
+async function fetchStatus() {
+  try {
+    const d = await (await fetch('/status')).json();
+    if (d.server_time) $clock.textContent = d.server_time;
+    if (d.mode === 'crowd' && d.crowd_cameras) {
+      const failed = Object.entries(d.crowd_cameras)
+        .filter(([, state]) => state === 'error')
+        .map(([role]) => role);
+      if (failed.length) {
+        const message = `Crowd camera error: ${failed.join(', ')}. Stop and check camera IDs/connections.`;
+        $statusTxt.textContent = 'CAMERA ERROR';
+        if (lastCrowdError !== message) toast(message, 'err');
+        lastCrowdError = message;
+      } else {
+        lastCrowdError = '';
+      }
+    }
+    const firearmStatus = document.getElementById('firearm-model-status');
+    if (firearmStatus) {
+      firearmStatus.textContent = d.firearm_detection_status || 'Firearm model status unavailable';
+      firearmStatus.classList.toggle('warning', !d.firearm_detection_enabled);
+    }
+    const deviceStatus = document.getElementById('inference-device-status');
+    if (deviceStatus) {
+      const deviceName = d.inference_device_name || String(d.inference_device || 'unknown').toUpperCase();
+      deviceStatus.textContent = `Inference: ${deviceName}`;
+      deviceStatus.classList.toggle('warning', String(d.inference_device || '').toLowerCase() === 'cpu');
+    }
+    if (running && d.pipeline_running === false) { onOffline(); toast('Pipeline ended.', 'ok'); }
+  } catch (_) {}
+}
+
+async function fetchStats() {
+  try {
+    const d = await (await fetch('/stats')).json();
+    const flow = d.crowd_flow || {};
+    const crowdElements = [
+      'crowd-flow-card', 'crowd-flow-divider1', 'crowd-exit-card',
+      'crowd-flow-divider2', 'crowd-balance-card', 'crowd-flow-divider3',
+    ];
+    crowdElements.forEach(id => {
+      const element = document.getElementById(id);
+      if (element) element.classList.toggle('active', d.mode === 'crowd');
+    });
+    document.getElementById('crowd-entry').textContent =
+      `${flow.entry_count ?? 0} / ${flow.window_seconds ?? 60}s`;
+    document.getElementById('crowd-exit').textContent =
+      `${flow.exit_count ?? 0} / ${flow.window_seconds ?? 60}s`;
+    const balance = document.getElementById('crowd-balance');
+    balance.textContent = flow.alert_active
+      ? `ALERT ${flow.difference > 0 ? '+' : ''}${flow.difference}`
+      : 'BALANCED';
+    balance.className = `stat-value ${flow.alert_active ? 'danger' : 'safe'}`;
+    const current = d.current_count ?? 0;
+    document.getElementById('cnt-current').textContent = current;
+    const density = document.getElementById('cnt-density');
+    density.textContent = current >= 10 ? 'OVERCROWDED' : current >= 6 ? 'BUSY' : 'CLEAR';
+    density.className = 'stat-value ' + (current >= 10 ? 'danger' : current >= 6 ? 'warning' : 'safe');
+    document.getElementById('cnt-peak').textContent    = d.peak_count    ?? 0;
+    document.getElementById('cnt-unique').textContent  = d.total_unique  ?? 0;
+    document.getElementById('cnt-dur').textContent     = d.session_duration || '00:00:00';
+    const memMb  = d.memory_mb      != null ? d.memory_mb.toFixed(1)      : '\u2014';
+    document.getElementById('cnt-ram').textContent = memMb + ' MB';
+    document.getElementById('cnt-bags').textContent = d.bags_tracked ?? 0;
+    const speedCard = document.getElementById('speed-card');
+    const speedDiv  = document.getElementById('speed-divider');
+    if (d.video_fps != null && d.video_fps > 0) {
+      speedCard.style.display = '';
+      if (speedDiv) speedDiv.style.display = '';
+      const pFps  = (d.processing_fps ?? 0).toFixed(1);
+      document.getElementById('cnt-speed').textContent = pFps + ' FPS';
+    } else {
+      speedCard.style.display = 'none';
+      if (speedDiv) speedDiv.style.display = 'none';
+    }
+  } catch (_) {}
+}
+
+async function fetchEvents() {
+  try {
+    const items = await (await fetch('/events')).json();
+    if (!Array.isArray(items)) return;
+    allEvents  = items;
+    eventCount = items.length;
+    $badge.textContent = eventCount;
+    const statBadge = document.getElementById('event-badge-stat');
+    if (statBadge) statBadge.textContent = eventCount;
+    if (!logCleared) applyFilters();
+  } catch (_) {}
+}
+
+/* === SEARCH / FILTER === */
+function applyFilters() {
+  const searchTerm = document.getElementById('search-id').value.trim().toLowerCase();
+  const typeFilter = document.getElementById('filter-type').value.toLowerCase();
+  const filtered = allEvents.filter(evt => {
+    const idStr  = String(evt.track_id ?? '');
+    const vtype  = (evt.violation_type || '').toLowerCase();
+    return (searchTerm ? idStr.toLowerCase().includes(searchTerm) : true)
+        && (typeFilter ? vtype.includes(typeFilter) : true);
+  });
+  renderLog(filtered.slice(0, MAX_DOM), searchTerm);
+  $filterCnt.textContent = `Showing ${Math.min(filtered.length, MAX_DOM)} of ${allEvents.length} events`;
+}
+
+function clearLog() {
+  logCleared = true;
+  $evtLog.querySelectorAll('.evt').forEach(el => el.remove());
+  $empty.style.display = '';
+  $filterCnt.textContent = `Showing 0 of ${allEvents.length} events`;
+}
+
+function renderLog(items, searchTerm) {
+  $evtLog.querySelectorAll('.evt').forEach(el => el.remove());
+  if (items.length === 0) { $empty.style.display = ''; return; }
+  $empty.style.display = 'none';
+  items.forEach(evt => $evtLog.appendChild(buildCard(evt, searchTerm || '')));
+  $evtLog.scrollTop = 0;
+}
+
+function classifyViolation(vtypeLower) {
+  if (vtypeLower.includes('crowd flow'))
+    return { cardCls: 'evt-crowd', colourKey: 'running' };
+  if (vtypeLower.includes('running') || vtypeLower.includes('sudden'))
+    return { cardCls: 'evt-running',   colourKey: 'running' };
+  if (vtypeLower.includes('loitering'))
+    return { cardCls: 'evt-loitering', colourKey: 'loitering' };
+  if (vtypeLower.includes('unsafe') || vtypeLower.includes('strange'))
+    return { cardCls: 'evt-weapon',    colourKey: 'weapon' };
+  if (vtypeLower.includes('lingering') || vtypeLower.includes('suspicious'))
+    return { cardCls: 'evt-lingering', colourKey: 'lingering' };
+  if (vtypeLower.includes('weapon'))
+    return { cardCls: 'evt-weapon',    colourKey: 'weapon' };
+  if (vtypeLower.includes('abandoned') || vtypeLower.includes('bag'))
+    return { cardCls: 'evt-bag',       colourKey: 'bag' };
+  if (vtypeLower.includes('theft'))
+    return { cardCls: 'evt-theft',     colourKey: 'theft' };
+  return { cardCls: 'evt-lingering',   colourKey: 'lingering' };
+}
+
+function buildCard(evt, searchTerm) {
+  const vtype = (evt.violation_type || '').toLowerCase();
+  const { cardCls } = classifyViolation(vtype);
+  const idStr = String(evt.track_id ?? '?');
+  const highlighted = searchTerm && idStr.toLowerCase().includes(searchTerm)
+    ? idStr.replace(new RegExp(`(${escRe(searchTerm)})`, 'gi'), '<mark>$1</mark>')
+    : idStr;
+  const el = document.createElement('div');
+  el.className = `evt ${cardCls}`;
+  el.innerHTML = `
+    <div class="evt-top">
+      <span class="evt-type">${esc(evt.violation_type || 'Unknown')}</span>
+      <span class="evt-time">${esc(evt.timestamp || '')}</span>
+    </div>
+    <div class="evt-bottom">
+      <span class="evt-tag id-tag">ID #${highlighted}</span>
+    </div>`;
+  return el;
+}
+
+/* === GALLERY === */
+const _GALLERY_FILTER_KEYS = {
+  'all':'active','running':'active-running','loitering':'active-loitering',
+  'lingering':'active-lingering','weapon':'active-weapon','bag':'active-bag','theft':'active-theft',
+};
+
+function setGalleryFilter(f) {
+  galleryFilter = f;
+  document.querySelectorAll('.gf-btn').forEach(b => {
+    b.className = 'gf-btn';
+    if (b.id.replace('gf-', '') === f) b.classList.add(_GALLERY_FILTER_KEYS[f] || 'active');
+  });
+  renderGallery();
+}
+
+async function fetchGallery() {
+  try {
+    const items = await (await fetch('/snapshots')).json();
+    if (!Array.isArray(items)) return;
+    allSnapshots = items;
+    renderGallery();
+  } catch (_) {}
+}
+
+function renderGallery() {
+  const grid  = document.getElementById('gallery-grid');
+  const empty = document.getElementById('gallery-empty');
+  const info  = document.getElementById('gallery-info');
+  grid.querySelectorAll('.snap-card').forEach(el => el.remove());
+  const filtered = allSnapshots.filter(s => {
+    if (galleryFilter === 'all') return true;
+    return (s.violation_type || '').toLowerCase().includes(galleryFilter);
+  });
+  info.textContent = `${filtered.length} snapshot${filtered.length !== 1 ? 's' : ''}`;
+  if (filtered.length === 0) { empty.style.display = 'flex'; return; }
+  empty.style.display = 'none';
+  filtered.forEach(snap => grid.appendChild(buildSnapCard(snap)));
+}
+
+function buildSnapCard(snap) {
+  const vtype = (snap.violation_type || '').toLowerCase();
+  const { colourKey } = classifyViolation(vtype);
+  const card = document.createElement('div');
+  card.className = 'snap-card';
+  card.innerHTML = `
+    <img class="snap-img" src="${esc(snap.url)}" alt="Snapshot" loading="lazy"/>
+    <div class="snap-meta">
+      <span class="snap-badge badge-${colourKey}">${esc(snap.violation_type || '')}</span>
+      <span class="snap-id">ID #${esc(String(snap.track_id ?? '?'))}</span>
+      <span class="snap-time">${esc(snap.timestamp || '')}</span>
+    </div>`;
+  card.addEventListener('click', () => openModal(snap));
+  return card;
+}
+
+/* --- Lightbox --- */
+function openModal(snap) {
+  const modal = document.getElementById('modal');
+  document.getElementById('modal-img').src   = snap.url;
+  document.getElementById('modal-title').textContent = snap.violation_type || 'Unknown';
+  document.getElementById('modal-sub').textContent   =
+    `Track ID #${snap.track_id}  \u00B7  ${snap.timestamp}`;
+  modal.classList.add('open');
+}
+
+function closeModal(e) {
+  if (e && e.target !== document.getElementById('modal')) return;
+  document.getElementById('modal').classList.remove('open');
+  document.getElementById('modal-img').src = '';
+}
+
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') document.getElementById('modal').classList.remove('open');
+});
+
+/* === TOAST === */
+let _tId = null;
+function toast(msg, type = '') {
+  if (_tId) clearTimeout(_tId);
+  const $t = document.getElementById('toast');
+  $t.textContent = msg;
+  $t.className   = 'show ' + type;
+  _tId = setTimeout(() => { $t.className = ''; }, 3400);
+}
+
+/* === UTILS === */
+function esc(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+function escRe(s) { return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
+
+/* --- Stream stall watchdog --- */
+let _lastStreamLoad = Date.now();
+$stream.addEventListener('load', () => { _lastStreamLoad = Date.now(); });
+setInterval(() => {
+  if (running && (Date.now() - _lastStreamLoad) > 3000) {
+    const base = $stream.src.split('?')[0];
+    $stream.src = base + '?' + Date.now();
+  }
+}, 3000);
+
+/* --- Init --- */
+onOffline();
+onSrcChange();
+fetchStatus();
+</script>
+</body>
+</html>

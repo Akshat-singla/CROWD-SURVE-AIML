@@ -1,0 +1,37 @@
+# =============================================================================
+# Real-Time AI Surveillance System — Requirements
+# =============================================================================
+# Install with: pip install -r requirements.txt
+# Recommended: Python 3.9+ in a virtual environment.
+
+# ── Core Deep Learning & Detection ─────────────────────────────────────────
+torch                         # PyTorch backend for YOLOv8 (latest compatible)
+torchvision                   # Vision utilities aligned with torch
+ultralytics            # YOLOv8 detection + ByteTrack tracking
+lap>=0.5.12            # ByteTrack's linear assignment dependency
+
+# ── Computer Vision ─────────────────────────────────────────────────────────
+opencv-python-headless  # Frame capture, drawing, video I/O (headless server)
+
+# ── Data Handling & Feature Engineering ─────────────────────────────────────
+numpy                 # Numerical arrays and vector math
+pandas                 # Tabular data, feature buffers, CSV logging
+
+# ── Machine Learning ─────────────────────────────────────────────────────────
+scikit-learn           # Classifier training, scaling, evaluation
+joblib                 # Model serialisation / deserialisation
+
+# ── Web Dashboard ─────────────────────────────────────────────────────────────
+flask                  # Lightweight web server for the live dashboard
+
+# ── Memory Monitoring (Enhancement 2) ─────────────────────────────────────────
+psutil                 # Process memory RSS monitoring (required)
+
+# ── Optional — DeepSORT Tracker (Enhancement 6) ────────────────────────────────
+# Only install if TRACKER_TYPE = "deepsort" in dashboard/config.py.
+# Default tracker is ByteTrack (built into ultralytics) — no extra install needed.
+# deep-sort-realtime   # Uncomment to enable DeepSORT backend
+
+# ── Visualisation ─────────────────────────────────────────────────────────────
+matplotlib             # Plotting activity timelines and statistics
+seaborn               # Enhanced statistical visualisations
