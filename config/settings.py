@@ -159,7 +159,30 @@ CLASSIFIER_MODEL_PATH = os.path.join(BASE_DIR, "models", "activity_classifier.pk
 
 
 # ===========================================================================
-# 9.  FLASK DASHBOARD
+# 9.  OBJECT DETECTION  (weapons, bags)
+# ===========================================================================
+
+# Confidence threshold for weapon / bag object detector.
+OBJECT_CONF_THRESHOLD = 0.45
+
+# Custom weapon-detection model (2 classes: person, weapon).
+# Trained via: python train_weapon_detector.py --data data/weapon_dataset/data.yaml
+# When None, falls back to YOLO_MODEL_PATH (COCO classes only: knife/scissors).
+_DEFAULT_WEAPON_MODEL = os.path.join(BASE_DIR, "models", "weapon_yolov8.pt")
+WEAPON_MODEL_PATH = (
+    _DEFAULT_WEAPON_MODEL if os.path.isfile(_DEFAULT_WEAPON_MODEL) else None
+)
+
+# Run object detection every N frames.
+OBJECT_DETECTION_INTERVAL = 4
+
+# COCO object classes used as fallback when WEAPON_MODEL_PATH is None:
+#   24=backpack, 26=handbag, 28=suitcase, 43=knife, 76=scissors
+OBJECT_TARGET_CLASSES = [24, 26, 28, 43, 76]
+
+
+# ===========================================================================
+# 10.  FLASK DASHBOARD
 # ===========================================================================
 
 FLASK_HOST = "0.0.0.0"   # listen on all interfaces
@@ -171,7 +194,7 @@ DASHBOARD_MAX_ALERTS = 50
 
 
 # ===========================================================================
-# 10.  ANNOTATION / DISPLAY
+# 11.  ANNOTATION / DISPLAY
 # ===========================================================================
 
 # Bounding-box colours per activity category (BGR).

@@ -13,7 +13,14 @@ import argparse
 import shutil
 from pathlib import Path
 
-from ultralytics import YOLO
+try:
+    from ultralytics import YOLO
+except ImportError as e:
+    raise ImportError(
+        "Failed to import ultralytics. Please install it with: pip install ultralytics"
+    ) from e
+
+BASE_DIR = Path(__file__).resolve().parent
 
 
 def main() -> None:
@@ -23,7 +30,7 @@ def main() -> None:
     parser.add_argument("--epochs", type=int, default=50)
     parser.add_argument("--imgsz", type=int, default=640)
     parser.add_argument("--batch", type=int, default=8)
-    parser.add_argument("--output", default="models/weapon_yolov8.pt")
+    parser.add_argument("--output", default=str(BASE_DIR / "models" / "weapon_yolov8.pt"))
     args = parser.parse_args()
 
     data_path = Path(args.data).resolve()
@@ -32,13 +39,16 @@ def main() -> None:
     if args.epochs < 1 or args.imgsz < 32 or args.batch < 1:
         raise ValueError("epochs, imgsz, and batch must be positive")
 
+    project_dir = BASE_DIR / "runs" / "weapon"
+    project_dir.mkdir(parents=True, exist_ok=True)
+
     model = YOLO(args.base_model)
     results = model.train(
         data=str(data_path),
         epochs=args.epochs,
         imgsz=args.imgsz,
         batch=args.batch,
-        project="runs/weapon",
+        project=str(project_dir),
         name="train",
         exist_ok=True,
     )
@@ -46,10 +56,10 @@ def main() -> None:
     if not best.is_file():
         raise FileNotFoundError(f"Training completed without best.pt: {best}")
 
-    output = Path(args.output)
+    output = Path(args.output).resolve()
     output.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(best, output)
-    print(f"Saved weapon detector to {output.resolve()}")
+    print(f"Saved weapon detector to {output}")
 
 
 if __name__ == "__main__":

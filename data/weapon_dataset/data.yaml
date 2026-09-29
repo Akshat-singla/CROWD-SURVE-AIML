@@ -1,0 +1,7 @@
+path: /Users/akshatsingla/Desktop/Aiml+project/CROWD-SURVE-AIML/data/weapon_dataset
+train: images/train
+val: images/val
+
+names:
+  0: person
+  1: weapon
