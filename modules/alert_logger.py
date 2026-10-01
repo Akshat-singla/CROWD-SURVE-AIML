@@ -122,7 +122,7 @@ class AlertLogger:
                 "timestamp":      float,       (Unix time)
                 "raw_frame":      np.ndarray,  (un-annotated BGR — for snapshot)
                 "all_tracks":     list,         (Track objects for all persons)
-                "session_start":  float | None, (session start Unix time)
+                "session_start":  Optional[float], (session start Unix time)
             }
         """
         logger.info("Log worker thread started.")

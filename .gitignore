@@ -1,7 +1,51 @@
+# Python & Bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+*.cache
+
+# Virtual Environments
+venv/
+env/
+.venv/
+ENV/
+env.bak/
+venv.bak/
+
+# Operating System & IDEs
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Environment Variables & Secrets
+.env
+.env.*
+!.env.example
+
+# Media & Video files
 outputs/
 *.mp4
 *.avi
 *.mov
-__pycache__/
-.env
-.vscode
+*.mkv
+*.webm
+
+# Training Artifacts & Logs
+runs/
+*.log
+
+# Runtime data, logs, and evidence snapshots
+data/snapshots/*
+!data/snapshots/.gitkeep
+data/logs/*
+!data/logs/.gitkeep
+data/output/*
+!data/output/.gitkeep

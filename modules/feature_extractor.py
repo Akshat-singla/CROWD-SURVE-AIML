@@ -65,7 +65,7 @@ class FeatureExtractor:
 
         Returns
         -------
-        dict[str, float] | None
+        Optional[Dict[str, float]]
             Feature dict, or None if the buffer is too small or time span zero.
 
         Feature definitions  (Fix 3 & 4 — all speeds in px/sec of video time)

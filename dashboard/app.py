@@ -1,77 +1,5 @@
-# =============================================================================
-# dashboard/app.py
-# Flask Surveillance Dashboard — capture, tracking, object, and logging workers.
-#
-# Thread 1 — Capture Thread
-#   Reads raw frames from the video source at native FPS and stores the
-#   latest raw frame in latest_raw_frame (protected by raw_frame_lock).
-#   Thread 2 processes each newly captured frame once; repeated reads are skipped.
-#   Paces itself to source FPS (capped at 60) so it never starves Thread 2.
-#
-# Thread 2 — Processing Thread
-#   Reads the latest raw frame from latest_raw_frame.  Runs YOLOv8 +
-#   ByteTrack/DeepSORT at a configurable cadence (reusing tracks between
-#   inferences). YOLO letterboxes source frames to preserve aspect ratio.
-#   Classifies behaviour violations. Object inference runs on its own bounded
-#   worker, detecting weapons and bags; the processing worker handles
-#   abandonment and heuristic theft. Submits logging jobs to AlertLogger.
-#   Annotates a *copy* of the frame and writes the result into
-#   latest_frame (protected by frame_lock) — the MJPEG generator always
-#   reads exactly one latest frame, never a stale backlog.
-#   Encodes at JPEG quality 60 to reduce stream latency.
-#
-# Object Worker — one in-flight object-detection inference alongside tracking.
-#
-# Thread 3 — Log / Snapshot Worker (AlertLogger.run_worker)
-#   Drains log_queue, renders violation-highlighted snapshots (Enhancement 1),
-#   saves JPEG, appends CSV rows, updates the in-memory event deque.
-#
-# Enhancement 2 — Memory Management:
-#   • track_last_seen dict keeps timestamps; a 30-second Timer cleans up
-#     stale tracks (not seen for ≥ 60 s) from all buffers.
-#   • psutil monitors RAM; forces gc.collect() if > MAX_MEMORY_MB.
-#   • log_queue is bounded (maxsize=50); overflow is dropped with a warning.
-#   • Frame references are explicitly freed after enqueuing.
-#
-# Enhancement 3 — Object Detection (Weapons & Bags):
-#   ObjectDetector runs every 4th frame detecting knives, scissors, handbags,
-#   backpacks, suitcases.  Weapons trigger an immediate violation log; bags
-#   go into BagTracker.
-#
-# Enhancement 4 — Abandoned Bag Detection:
-#   BagTracker monitors bag locations across frames.  A bag stationary for
-#   ≥ ABANDONED_BAG_SECONDS with no nearby person is flagged as abandoned.
-#
-# Enhancement 5 — Theft Detection (heuristic):
-#   When a bag disappears and a person's centroid was within THEFT_PROXIMITY_PX
-#   pixels of the bag's last position, a "Possible Theft" violation is raised.
-#
-#   NOTE: This is a heuristic approximation.  It will produce false positives
-#   in crowded scenes where multiple people are near a bag and one of them
-#   simply walks away while another picks it up legitimately.  A more robust
-#   implementation would use object Re-ID (e.g. a learned bag-appearance
-#   embedding) to track specific bag instances across frames independently of
-#   position, making the matching far more reliable.
-#
-# Enhancement 6 — Tracker Selection:
-#   Set TRACKER_TYPE in config.py.  PersonTracker now supports both ByteTrack
-#   (default) and DeepSORT backends through a factory pattern.
-#
-# Flask Routes:
-#   GET  /              → dashboard HTML
-#   GET  /video_feed    → MJPEG stream from latest_frame (lock-protected)
-#   POST /start         → launch pipeline
-#   POST /stop          → stop pipeline cleanly
-#   GET  /events        → latest events as JSON
-#   GET  /status        → pipeline status JSON
-#   GET  /stats         → people-counter + memory stats JSON
-#   POST /upload        → receive & save uploaded video file
-#   GET  /snapshots     → snapshot gallery metadata
-#   GET  /snapshot-image/<filename>  → serve snapshot JPEG
-# =============================================================================
-
 import gc
-from concurrent.futures import Future, ThreadPoolExecutor
+# from concurrent.futures import Future, ThreadPoolExecutor  # no longer needed
 import logging
 import os
 import queue
@@ -81,7 +9,7 @@ import time
 import uuid
 from datetime import datetime, timezone
 # queue is still imported for log_queue used inside AlertLogger
-from typing import Optional
+from typing import Optional, Union
 
 import cv2
 import numpy as np
@@ -687,11 +615,9 @@ def _process_thread_fn(stop_event: threading.Event, alert_logger: AlertLogger) -
 
     # Track whether we've confirmed the first successful frame write.
     _first_frame_written = False
-    object_future: Optional[Future] = None
-    pending_object_frame: Optional[np.ndarray] = None
-    pending_object_timestamp = 0.0
     latest_weapon_detects: list = []
-    object_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="ObjectDetection")
+    # Object detection now runs synchronously on the current frame for zero delay
+    # (OBJECT_DETECTION_INTERVAL=1 means every frame; increase for performance)
 
     try:
         while not stop_event.is_set():
@@ -782,19 +708,16 @@ def _process_thread_fn(stop_event: threading.Event, alert_logger: AlertLogger) -
                             session_start=session_start,
                         )
 
-            # Object YOLO runs on a single worker so the person tracker doesn't
-            # wait for its inference. One pending job bounds GPU/CPU contention.
+            # Run object detection synchronously on this frame for zero-delay weapon detection
+            # (runs every OBJECT_DETECTION_INTERVAL frames, default=1 for every frame)
             theft_track_ids: set = set()
-            if object_future is not None and object_future.done():
-                try:
-                    all_obj_detections = object_future.result()
-                except Exception:
-                    logger.exception("Asynchronous object detection failed.")
-                    all_obj_detections = []
-                object_future = None
-                object_timestamp = pending_object_timestamp
-                object_frame = pending_object_frame if pending_object_frame is not None else original_frame
-                pending_object_frame = None
+            all_obj_detections = []
+            bag_detections = []
+            object_timestamp = timestamp
+            object_frame = original_frame
+
+            if frame_number % config.OBJECT_DETECTION_INTERVAL == 0:
+                all_obj_detections = obj_detector.detect(original_frame)
 
                 latest_weapon_detects = [
                     d for d in all_obj_detections if d.category == "weapon"
@@ -872,14 +795,6 @@ def _process_thread_fn(stop_event: threading.Event, alert_logger: AlertLogger) -
                         session_start=session_start,
                     )
                 prev_bag_detections = bag_detections
-
-            if (object_future is None
-                    and frame_number % config.OBJECT_DETECTION_INTERVAL == 0):
-                pending_object_frame = original_frame.copy()
-                pending_object_timestamp = timestamp
-                object_future = object_executor.submit(
-                    obj_detector.detect, pending_object_frame.copy()
-                )
 
             weapon_detects = latest_weapon_detects
 
@@ -971,7 +886,6 @@ def _process_thread_fn(stop_event: threading.Event, alert_logger: AlertLogger) -
     except Exception as exc:
         logger.error("[Thread 2] Unexpected error: %s", exc, exc_info=True)
     finally:
-        object_executor.shutdown(wait=True, cancel_futures=True)
         logger.info("[Thread 2] Processing thread stopped.")
         with _status_lock:
             _status["pipeline_running"] = False
@@ -1111,7 +1025,7 @@ def _publish_crowd_frames() -> None:
 
 def _crowd_camera_worker(
     role: str,
-    source: int | str,
+    source: Union[int, str],
     direction: str,
     stop_event: threading.Event,
     alert_logger: AlertLogger,
@@ -1265,8 +1179,8 @@ def _crowd_camera_worker(
 # ===========================================================================
 
 def _launch_crowd_pipeline(
-    entry_source: int | str,
-    exit_source: int | str,
+    entry_source: Union[int, str],
+    exit_source: Union[int, str],
     source_type: str,
     window_seconds: int,
     alert_threshold: int,

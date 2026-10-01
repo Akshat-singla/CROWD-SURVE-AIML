@@ -14,7 +14,7 @@
 
 import time
 import logging
-from typing import Optional
+from typing import Optional, Union
 
 import cv2
 
@@ -48,11 +48,11 @@ class VideoInput:
 
         Parameters
         ----------
-        source : int | str | None
+        source : Optional[Union[int, str]]
             • int  → webcam index (0 = default camera, 1 = second camera, …)
             • str  → absolute or relative path to a video file.
             • None → falls back to the value of TARGET_FPS in config/settings.py.
-        target_fps : float | None
+        target_fps : Optional[float]
             Maximum frames per second to yield.  Frames arriving faster than
             this rate are skipped.  Pass None (default) to use the value from
             config/settings.py; pass 0 or a negative number to disable capping.

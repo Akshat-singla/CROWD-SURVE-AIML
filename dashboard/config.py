@@ -155,8 +155,9 @@ WEAPON_MODEL_PATH = os.environ.get("WEAPON_MODEL_PATH") or (
     _DEFAULT_WEAPON_MODEL if os.path.isfile(_DEFAULT_WEAPON_MODEL) else None
 )
 
-# Run object detection every N frames (4 = 25% of frames at 15 fps ≈ ~3-4 det/s).
-OBJECT_DETECTION_INTERVAL = int(os.environ.get("OBJECT_DETECTION_INTERVAL", "4"))
+# Run object detection every N frames. Set to 1 for real-time weapon detection
+# (runs on every frame), or 2 for every other frame. Lower = less delay.
+OBJECT_DETECTION_INTERVAL = int(os.environ.get("OBJECT_DETECTION_INTERVAL", "1"))
 
 # Prevent repeated weapon alerts while the same object remains visible.
 WEAPON_ALERT_COOLDOWN = 10.0
@@ -239,7 +240,7 @@ os.makedirs(LOG_DIR, exist_ok=True)
 # ===========================================================================
 
 FLASK_HOST  = "0.0.0.0"
-FLASK_PORT  = 5000
+FLASK_PORT  = 5001
 FLASK_DEBUG = False
 
 # ===========================================================================

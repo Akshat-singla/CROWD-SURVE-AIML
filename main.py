@@ -19,7 +19,7 @@ import os
 import sys
 import threading
 import time
-from typing import Dict, Optional
+from typing import Dict, Optional, Union
 
 import cv2
 import numpy as np
@@ -40,10 +40,10 @@ from config.settings import (
 )
 from modules.video_input      import VideoInput
 from modules.detector         import PersonDetector
-from modules.tracker          import MultiPersonTracker
+from modules.tracker          import PersonTracker
 from modules.behaviour_buffer import BehaviourBuffer
 from modules.feature_extractor import FeatureExtractor
-from modules.classifier       import ActivityClassifier
+from modules.classifier       import ViolationClassifier
 from modules.alert_logger     import AlertLogger
 from modules.annotator        import FrameAnnotator
 
@@ -72,7 +72,7 @@ class SurveillancePipeline:
 
     Parameters
     ----------
-    source : str | int | None
+    source : Optional[Union[str, int]]
         Video source — camera index or file path.  None → uses config default.
     show_window : bool
         Whether to display annotated frames in a named OpenCV window.
@@ -106,11 +106,15 @@ class SurveillancePipeline:
         # Initialise all pipeline modules.
         logger.info("Initialising surveillance pipeline modules…")
         self.video     = VideoInput(source=self._source, target_fps=TARGET_FPS)
-        self.detector  = PersonDetector()
-        self.tracker   = MultiPersonTracker(fps=TARGET_FPS or 15)
+        self.tracker   = PersonTracker(
+            model_path=YOLO_MODEL_PATH,
+            confidence=DETECTION_CONFIDENCE,
+            imgsz=640,
+            tracker_type=TRACKER_TYPE,
+        )
         self.buf       = BehaviourBuffer()
         self.extractor = FeatureExtractor()
-        self.clf       = ActivityClassifier()
+        self.clf       = ViolationClassifier()
         self.alerter   = AlertLogger()
         self.annotator = FrameAnnotator()
 
@@ -156,16 +160,8 @@ class SurveillancePipeline:
                 if not self._running:
                     break
 
-                # ── 1. Detection ───────────────────────────────────────────
-                detections = self.detector.detect(frame)
-
-                # ── 2. Tracking ────────────────────────────────────────────
-                tracks = self.tracker.update(
-                    detections=detections,
-                    frame_shape=frame.shape,
-                    timestamp=timestamp,
-                    frame=frame,
-                )
+                # ── 1. Detection + Tracking (combined in PersonTracker) ──────
+                tracks = self.tracker.update(frame=frame, timestamp=timestamp)
                 active_ids = {t.track_id for t in tracks}
 
                 # ── 3. Behaviour buffer update + stale cleanup ─────────────

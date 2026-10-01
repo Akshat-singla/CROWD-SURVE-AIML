@@ -158,7 +158,7 @@ class ObjectDetector:
             firearm_labels = [
                 str(label) for label in labels
                 if any(token in str(label).lower()
-                       for token in ("gun", "firearm", "pistol", "rifle", "handgun"))
+                       for token in ("gun", "firearm", "pistol", "rifle", "handgun", "weapon"))
             ]
             if not firearm_labels:
                 logger.warning(

@@ -4,6 +4,7 @@ from collections import deque
 from dataclasses import dataclass, field
 from threading import Lock
 from time import monotonic
+from typing import Optional, Dict, Deque, Any
 
 
 @dataclass
@@ -12,10 +13,10 @@ class CrowdFlowMonitor:
 
     window_seconds: int = 60
     alert_threshold: int = 5
-    _crossings: dict[str, deque[float]] = field(
+    _crossings: Dict[str, Deque[float]] = field(
         default_factory=lambda: {"entry": deque(), "exit": deque()}
     )
-    _last_side: dict[str, dict[int, int]] = field(
+    _last_side: Dict[str, Dict[int, int]] = field(
         default_factory=lambda: {"entry": {}, "exit": {}}
     )
     _lock: Lock = field(default_factory=Lock)
@@ -26,7 +27,7 @@ class CrowdFlowMonitor:
         tracks: list,
         frame_width: int,
         direction: str,
-        timestamp: float | None = None,
+        timestamp: Optional[float] = None,
     ) -> int:
         """Record one event per person as their centroid crosses the center line."""
         if camera_role not in self._crossings:
@@ -69,7 +70,7 @@ class CrowdFlowMonitor:
             self._prune_locked(now)
         return added
 
-    def snapshot(self, timestamp: float | None = None) -> dict[str, int | bool | float]:
+    def snapshot(self, timestamp: Optional[float] = None) -> Dict[str, Any]:
         """Return rolling counts and whether the configured mismatch is exceeded."""
         now = monotonic() if timestamp is None else timestamp
         with self._lock:

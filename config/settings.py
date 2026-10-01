@@ -173,8 +173,8 @@ WEAPON_MODEL_PATH = (
     _DEFAULT_WEAPON_MODEL if os.path.isfile(_DEFAULT_WEAPON_MODEL) else None
 )
 
-# Run object detection every N frames.
-OBJECT_DETECTION_INTERVAL = 4
+# Run object detection every N frames. Set to 1 for real-time weapon detection.
+OBJECT_DETECTION_INTERVAL = 1
 
 # COCO object classes used as fallback when WEAPON_MODEL_PATH is None:
 #   24=backpack, 26=handbag, 28=suitcase, 43=knife, 76=scissors

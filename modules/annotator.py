@@ -39,11 +39,11 @@ class FrameAnnotator:
 
     Parameters
     ----------
-    restricted_zones : list | None
+    restricted_zones : Optional[list]
         Zone polygon definitions.  Defaults to ``RESTRICTED_ZONES`` in config.
-    draw_trails : bool | None
+    draw_trails : Optional[bool]
         Whether to draw centroid movement trails.  Defaults to ``DRAW_TRAILS``.
-    trail_length : int | None
+    trail_length : Optional[int]
         Maximum number of historic centroids to draw.  Defaults to ``TRAIL_LENGTH``.
     """
 
@@ -97,7 +97,7 @@ class FrameAnnotator:
             Active tracks for this frame (from MultiPersonTracker).
         track_activities : Dict[int, str]
             Maps track_id → activity label string.
-        buf : BehaviourBuffer | None
+        buf : Optional[BehaviourBuffer]
             Used to update internal trail histories from the buffer data.  Pass
             None to skip trail updates (trails will still be drawn from cache).
         fps : float

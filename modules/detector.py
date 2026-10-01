@@ -81,7 +81,7 @@ class PersonDetector:
         Minimum detection confidence threshold.
     imgsz : int
         Inference image size (shorter edge).  640 is the YOLOv8 default.
-    device : str | None
+    device : Optional[str]
         Torch device ("cuda", "cpu", "mps").  Auto-selected when None.
     """
 

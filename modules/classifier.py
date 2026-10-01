@@ -114,7 +114,7 @@ class ViolationClassifier:
 
         Returns
         -------
-        str | None
+        Optional[str]
             A violation label string, or None for normal behaviour.
         """
         if not features:
